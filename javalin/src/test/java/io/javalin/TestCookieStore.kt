@@ -6,8 +6,11 @@
 
 package io.javalin
 
+import com.fasterxml.jackson.annotation.JsonTypeInfo
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.javalin.http.Header
 import io.javalin.http.util.CookieStore
+import io.javalin.json.JavalinJackson
 import io.javalin.testing.TestUtil
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -104,5 +107,32 @@ class TestCookieStore {
             ctx.cookieStore().set("second", "world")
         }
         assertThat(http.get("/test").headers.get("Set-Cookie")).hasSize(1)
+    }
+
+    @JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, include = JsonTypeInfo.As.PROPERTY, property = "@class")
+    data class Foo(
+        val bar: String
+    )
+
+    @Test
+    fun `cookieStore support complex cookies`() = TestUtil.test { app, http ->
+        app.unsafeConfig().jsonMapper(
+            JavalinJackson(
+                objectMapper = JavalinJackson().mapper.apply {
+                    activateDefaultTypingAsProperty(
+                        this.polymorphicTypeValidator,
+                        ObjectMapper.DefaultTyping.JAVA_LANG_OBJECT,
+                        "@class",
+                    )
+                },
+                useVirtualThreads = true
+            )
+        )
+        app.get("/cookie-storer") { it.cookieStore().set("foo", Foo("monke")) }
+        app.get("/cookie-reader") { ctx ->
+            ctx.result(ctx.cookieStore().get<Any>("foo").toString())
+        }
+        http.getBody("/cookie-storer")
+        assertThat(http.getBody("/cookie-reader")).isEqualTo("Foo(bar=monke)")
     }
 }
